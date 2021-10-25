@@ -254,7 +254,8 @@ extension SolanaSDK {
                 if let signature = signature.signature {
                     data.append(signature)
                 } else {
-                    signaturesLength -= 1
+                    data = Data(fromArray: Array(repeating: 0, count: 8))
+//                    signaturesLength -= 1
                 }
                 return data
             })
@@ -286,4 +287,20 @@ extension SolanaSDK.Transaction {
             try container.encode(publicKey.base58EncodedString, forKey: .publicKey)
         }
     }
+}
+
+extension Data {
+
+    public init<T>(fromArray values: [T]) {
+        var values = values
+        self.init(buffer: UnsafeBufferPointer(start: &values, count: values.count))
+    }
+
+    public func toArray<T>(type: T.Type) -> [T] {
+        let value = self.withUnsafeBytes {
+            $0.baseAddress?.assumingMemoryBound(to: T.self)
+        }
+        return [T](UnsafeBufferPointer(start: value, count: self.count / MemoryLayout<T>.stride))
+    }
+
 }
