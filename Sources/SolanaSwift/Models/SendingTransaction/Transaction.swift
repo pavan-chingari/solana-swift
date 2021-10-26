@@ -40,7 +40,7 @@ extension SolanaSDK {
         }
         
         mutating func serialize(
-            requiredAllSignatures: Bool = true,
+            requiredAllSignatures: Bool = false,
             verifySignatures: Bool = false
         ) throws -> Data {
             // message
