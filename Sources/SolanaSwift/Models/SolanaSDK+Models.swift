@@ -46,7 +46,7 @@ public extension SolanaSDK {
 		public let commitment: [UInt64]?
 		public let totalStake: UInt64
 	}
-	struct ClusterNodes: Decodable {
+	struct ClusterNode: Decodable {
 		public let pubkey: String
 		public let gossip: String
 		public let tpu: String
@@ -82,12 +82,12 @@ public extension SolanaSDK {
 		public let firstNormalSlot: UInt64
 	}
 	struct Fee: Decodable {
-		public let feeCalculator: FeeCalculator?
+		public let feeCalculator: FeeCalculatorResponse?
 		public let feeRateGovernor: FeeRateGovernor?
 		public let blockhash: String?
 		public let lastValidSlot: UInt64?
 	}
-	struct FeeCalculator: Decodable {
+	struct FeeCalculatorResponse: Decodable {
 		public let lamportsPerSignature: Lamports
 	}
 	struct FeeRateGovernor: Decodable {
@@ -161,12 +161,14 @@ public extension SolanaSDK {
         public let slot: UInt64?
         public let err: TransactionError?
         public let memo: String?
+		public let blockTime: UInt64?
         
         public init(signature: String) {
             self.signature = signature
             self.slot = nil
             self.err = nil
             self.memo = nil
+			self.blockTime = nil
         }
     }
 	struct SignatureStatus: Decodable {
@@ -222,8 +224,8 @@ public extension SolanaSDK {
     }
     
     struct InnerInstruction: Decodable {
-        let index: UInt32
-        let instructions: [ParsedInstruction]
+        public let index: UInt32
+        public let instructions: [ParsedInstruction]
     }
     struct TokenBalance: Decodable {
         let accountIndex: UInt64

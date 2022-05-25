@@ -12,10 +12,8 @@ import RxSwift
 
 public protocol SolanaSDKAccountStorage {
     var account: SolanaSDK.Account? {get}
-    
-    func getAllHeaders() -> [String:String]?
+    func save(_ account: SolanaSDK.Account) throws
 }
-
 
 public class SolanaSDK {
     // MARK: - Properties
@@ -55,7 +53,6 @@ public class SolanaSDK {
         do {
             var urlRequest = try URLRequest(url: url, method: method, headers: [.contentType("application/json")])
             urlRequest.httpBody = try JSONEncoder().encode(requestAPI)
-            urlRequest.allHTTPHeaderFields = self.accountStorage.getAllHeaders()
             
             return RxAlamofire.request(urlRequest)
                 .responseData()
@@ -85,7 +82,8 @@ public class SolanaSDK {
                 }
                 .take(1)
                 .asSingle()
-                .catch { error in
+                .catch {[weak self] error in
+                    guard let self = self else {throw Error.unknown}
                     if let error = error as? Error, let replacingMethod = replacingMethod
                     {
                         switch error {

@@ -10,39 +10,46 @@ import RxSwift
 
 extension SolanaSDK {
     public func getTokensList() -> Single<[Token]> {
-        if let cache = supportedTokensCache {
-            return .just(cache)
-        }
-        let parser = TokensListParser()
-        return parser.parse(network: endpoint.network.cluster)
-            .do(onSuccess: {self.supportedTokensCache = $0})
+        let getCacheTokensRequest = Single<[Token]?>
+            .create { [weak self] observer in
+                if let cache = self?.supportedTokensCache {
+                    observer(.success(cache))
+                } else {
+                    observer(.success(nil))
+                }
+                return Disposables.create()
+            }
+            .subscribe(on: ConcurrentDispatchQueueScheduler(qos: .userInteractive))
+        
+        return getCacheTokensRequest
+            .observe(on: ConcurrentDispatchQueueScheduler(qos: .userInteractive))
+            .flatMap { [weak self] tokens in
+                guard let self = self else {return .just([])}
+                if let tokens = tokens {
+                    return .just(tokens)
+                }
+                let parser = TokensListParser()
+                return parser.parse(network: self.endpoint.network.cluster)
+                    .do(onSuccess: {[weak self] in self?.supportedTokensCache = $0})
+            }
     }
     
     public func getTokenWallets(account: String? = nil, log: Bool = true) -> Single<[Wallet]> {
         guard let account = account ?? accountStorage.account?.publicKey.base58EncodedString else {
             return .error(Error.unauthorized)
         }
-        let memcmp = EncodableWrapper(
-            wrapped:
-                ["offset": EncodableWrapper(wrapped: 32),
-                 "bytes": EncodableWrapper(wrapped: account)]
-        )
-        let configs = RequestConfiguration(commitment: "recent", encoding: "base64", dataSlice: nil, filters: [
-            ["memcmp": memcmp],
-            ["dataSize": .init(wrapped: 165)]
-        ])
         
         return Single.zip(
-            getProgramAccounts(
-                publicKey: PublicKey.tokenProgramId.base58EncodedString,
-                configs: configs,
-                decodedTo: AccountInfo.self,
+            getTokenAccountsByOwner(
+                pubkey: account,
+                params: .init(mint: nil, programId: PublicKey.tokenProgramId.base58EncodedString),
+                configs: .init(encoding: "base64"),
                 log: log
-            )
-                .map {$0.accounts},
+            ),
             getTokensList()
         )
-            .flatMap { list, supportedTokens -> Single<[Wallet]> in
+            .flatMap { [weak self] list, supportedTokens -> Single<[Wallet]> in
+                guard let self = self else {return .just([])}
                 var knownWallets = [Wallet]()
                 var unknownAccounts = [(String, AccountInfo)]()
                 

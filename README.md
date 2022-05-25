@@ -18,6 +18,7 @@ Solana-blockchain client, written in pure swift.
 ## Example
 
 To run the example project, clone the repo, and run `pod install` from the Example directory first.
+Demo wallet: [p2p-wallet](https://github.com/p2p-org/p2p-wallet-ios)
 
 ## Requirements
 - iOS 11 or later
@@ -136,79 +137,13 @@ solanaSDK.observeSignatureNotification(signature: <SIGNATURE>) // return an Comp
 ```
 
 ## How to use OrcaSwap
-* To test transitive swap with orca, the account must have some `SOL` and `KURO` token, then add this extensions to `Tests` target
-```swift
-extension OrcaSwapTransitiveTests {
-    var kuroPubkey: String {
-        <KURO-pubkey-here>
-    }
-    
-    var secretPhrase: String {
-        <account-seed-phrases>
-    }
-}
-```
+OrcaSwap has been moved to new library [OrcaSwapSwift](https://github.com/p2p-org/OrcaSwapSwift) 
 
-* Create instance of orca
-```swift
-let orcaSwap = OrcaSwap(
-    apiClient: OrcaSwap.MockAPIClient(network: "mainnet"),
-    solanaClient: solanaSDK,
-    accountProvider: solanaSDK,
-    notificationHandler: socket
-)
-```
-* Swap
-```swift
-// load any dependencies for swap to work
-orcaSwap.load()
-
-// find any destination that can be swapped to from a defined token mint
-orcaSwap.findPosibleDestinationMints(fromMint: btcMint)
-
-// get multiple tradable pools pairs (or routes) for a token pair (each pool pairs contains 1 or 2 pools for swapping)
-orcaSwap.getTradablePoolsPairs(fromMint: btcMint, toMint: ethMint)
-
-// get bestPool pair for swapping from tradable pools pairs that got from getTradablePoolsPair method, this method return a pool pair that can be used for swapping
-orcaSwap.findBestPoolsPairForInputAmount(inputAmount, from: poolsPairs)
-orcaSwap.findBestPoolsPairForEstimatedAmount(estimatedAmount, from: poolsPairs)
-
-// swap
-orcaSwap.swap(
-    fromWalletPubkey: <BTC wallet>,
-    toWalletPubkey: <ETH wallet>?,
-    bestPoolsPair: <best pool pair>,
-    amount: amount,
-    slippage: 0.05,
-    isSimulation: false
-)
-    .subscribe(onNext: {result in
-        print(result)
-    })
-    .disposed(by: disposeBag)
-```
-
+## How to use RenVM
+RenVM has been moved to new library [RenVMSwift](https://github.com/p2p-org/RenVMSwift)
 
 ## How to use Serum swap (DEX) (NOT STABLE)
-* Create an instance of SerumSwap
-```swift
-let serumSwap = SerumSwap(client: solanaSDK, accountProvider: solanaSDK)
-```
-* swap
-```swift
-serumSwap.swap(
-    fromMint: <PublicKey>,
-    toMint: <PublicKey>,
-    amount: <Lamports>,
-    minExpectedSwapAmount: <Lamports?>,
-    referral: <PublicKey?>,
-    quoteWallet: <PublicKey?>,
-    fromWallet: <PublicKey>,
-    toWallet: <PublicKey?>,
-    feePayer: <PublicKey?>,
-    configs: <SolanaSDK.RequestConfiguration? = nil>
-)
-```
+SerumSwap has been moved to new library [SerumSwapSwift](https://github.com/p2p-org/SerumSwapSwift)
 
 ## Contribution
 - For supporting new methods, data types, edit `SolanaSDK+Methods` or `SolanaSDK+Models`
