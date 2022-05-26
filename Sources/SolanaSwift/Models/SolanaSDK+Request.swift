@@ -64,6 +64,16 @@ extension SolanaSDK {
     }
     
     // MARK: - Public
+    public struct OwnerInfoParams: Encodable {
+        public let mint: String?
+        public let programId: String?
+
+        public init(mint: String?, programId: String?) {
+            self.mint = mint
+            self.programId = programId
+        }
+    }
+    
     public typealias Commitment = String
     
     public struct RequestConfiguration: Encodable {

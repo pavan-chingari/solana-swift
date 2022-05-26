@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'SolanaSwift'
-  s.version          = '1.0.0'
+  s.version          = '1.3.8'
   s.summary          = 'A client for Solana written in Swift.'
 
 # This description is used to generate tags and improve search results.
@@ -44,7 +44,7 @@ Solana-blockchain client, written in pure swift, which supports keypair generati
   s.dependency 'BufferLayoutSwift', '~> 0.9.0'
   s.dependency 'secp256k1.swift', '~> 0.1.0'
   s.dependency 'TweetNacl', '~> 1.0.2'
-  s.dependency 'RxCocoa', '~> 6.2.0'
+  s.dependency 'RxCocoa', '~> 6.5.0'
   s.dependency 'RxAlamofire', '~> 6.1.1'
   s.dependency 'Starscream', '~> 4.0.0'
 end

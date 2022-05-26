@@ -10,6 +10,14 @@ import Foundation
 import RxSwift
 
 public extension SolanaSDK {
+    public func getAccount() -> SolanaSDK.Account? {
+        accountStorage.account
+    }
+    
+    public func getNativeWalletAddress() -> PublicKey? {
+        accountStorage.account?.publicKey
+    }
+    
     func getAccountInfo<T: DecodableBufferLayout>(account: String, decodedTo: T.Type) -> Single<BufferInfo<T>> {
         let configs = RequestConfiguration(encoding: "base64")
         return (request(parameters: [account, configs]) as Single<Rpc<BufferInfo<T>?>>)
@@ -37,7 +45,7 @@ public extension SolanaSDK {
                 return Date(timeIntervalSince1970: TimeInterval(timestamp))
             }
     }
-    func getClusterNodes() -> Single<ClusterNodes> {
+    func getClusterNodes() -> Single<[ClusterNode]> {
         request()
     }
     func getConfirmedBlock(slot: UInt64, encoding: String = "json") -> Single<ConfirmedBlock?> {
@@ -61,7 +69,6 @@ public extension SolanaSDK {
     }
     func getSignaturesForAddress(address: String, configs: RequestConfiguration? = nil) -> Single<[SignatureInfo]> {
         request(
-            overridingEndpoint: "https://api.mainnet-beta.solana.com",
             parameters: [address, configs],
             onMethodNotFoundReplaceWith: "getConfirmedSignaturesForAddress2"
         )
@@ -75,7 +82,6 @@ public extension SolanaSDK {
     }
     func getTransaction(transactionSignature: String) -> Single<TransactionInfo> {
         request(
-            overridingEndpoint: "https://api.mainnet-beta.solana.com",
             parameters: [transactionSignature, "jsonParsed"],
             onMethodNotFoundReplaceWith: "getConfirmedTransaction"
         )
@@ -122,6 +128,9 @@ public extension SolanaSDK {
     }
     func getMinimumBalanceForRentExemption(dataLength: UInt64, commitment: Commitment? = "recent") -> Single<UInt64> {
         request(parameters: [dataLength, RequestConfiguration(commitment: commitment)])
+    }
+    func getMinimumBalanceForRentExemption(span: UInt64) -> Single<UInt64> {
+        getMinimumBalanceForRentExemption(dataLength: span)
     }
     func getMultipleAccounts<T: DecodableBufferLayout>(pubkeys: [String], decodedTo: T.Type, log: Bool = true) -> Single<[BufferInfo<T>]?> {
         let configs = RequestConfiguration(encoding: "base64")
@@ -179,7 +188,7 @@ public extension SolanaSDK {
         (request(parameters: [pubkey, RequestConfiguration(commitment: commitment)]) as Single<Rpc<TokenAccountBalance>>)
             .map {
                 if UInt64($0.value.amount) == nil {
-                    throw Error.invalidResponse(ResponseError(code: nil, message: "Could not retrieve balance", data: nil))
+                    throw Error.couldNotRetrieveAccountInfo
                 }
                 return $0.value
             }
@@ -188,8 +197,8 @@ public extension SolanaSDK {
         (request(parameters: [pubkey, mint, programId, configs]) as Single<Rpc<[TokenAccount<AccountInfo>]>>)
             .map {$0.value}
     }
-    func getTokenAccountsByOwner(pubkey: String, mint: String? = nil, programId: String? = nil, configs: RequestConfiguration? = nil) -> Single<[TokenAccount<AccountInfo>]> {
-        (request(parameters: [pubkey, mint, programId, configs]) as Single<Rpc<[TokenAccount<AccountInfo>]>>)
+    func getTokenAccountsByOwner(pubkey: String, params: OwnerInfoParams? = nil, configs: RequestConfiguration? = nil, log: Bool = true) -> Single<[TokenAccount<AccountInfo>]> {
+        (request(parameters: [pubkey, params, configs], log: log) as Single<Rpc<[TokenAccount<AccountInfo>]>>)
             .map {$0.value}
     }
     func getTokenLargestAccounts(pubkey: String, commitment: Commitment? = nil) -> Single<[TokenAmount]> {
@@ -243,16 +252,23 @@ public extension SolanaSDK {
     }
     
     func waitForConfirmation(signature: String) -> Completable {
+        var partiallyConfirmed = false
         // Due to a bug (https://github.com/solana-labs/solana/issues/15461)
         // the `confirmationStatus` field could be unpopulated.
         // To handle this case, also check the `confirmations` field.
         // Note that a `null` value for `confirmations` signals that the
         // transaction was finalized.
-        getSignatureStatus(signature: signature)
+        return getSignatureStatus(signature: signature)
+            .do(onSuccess: {status in
+                if let confirmations = status.confirmations,
+                   confirmations > 0
+                {
+                    partiallyConfirmed = true
+                }
+            })
             .map { status -> Bool in
-                (status.confirmations ?? 0) > 0 ||
                     status.confirmations == nil ||
-                    status.confirmationStatus == "confirmed"
+                    status.confirmationStatus == "finalized"
             }
             .flatMapCompletable { confirmed in
                 if confirmed {return .empty()}
@@ -260,6 +276,13 @@ public extension SolanaSDK {
             }
             .retry(maxAttempts: .max, delay: .seconds(1))
             .timeout(.seconds(60), scheduler: MainScheduler.instance)
+            .catch { error in
+                if partiallyConfirmed {
+                    return .empty()
+                }
+                
+                throw error
+            }
     }
     
     func simulateTransaction(transaction: String, configs: RequestConfiguration = RequestConfiguration(encoding: "base64")!) -> Single<TransactionStatus> {
@@ -317,11 +340,55 @@ public extension SolanaSDK {
                 return mintDict
             }
     }
+    
+    func checkIfAssociatedTokenAccountExists(
+        owner: PublicKey? = nil,
+        mint: String
+    ) -> Single<Bool> {
+        Single<PublicKey>.deferred { [weak self] in
+            guard let self = self else {
+                throw Error.unknown
+            }
+            guard let owner = owner ?? self.accountStorage.account?.publicKey else {
+                throw Error.unauthorized
+            }
+            
+            let mintAddress = try mint.toPublicKey()
+            
+            let associatedTokenAccount = try PublicKey.associatedTokenAddress(
+                walletAddress: owner,
+                tokenMintAddress: mintAddress
+            )
+            
+            return .just(associatedTokenAccount)
+        }
+            .observe(on: ConcurrentDispatchQueueScheduler(qos: .background))
+            .flatMap { [weak self] associatedTokenAccount in
+                guard let self = self else {throw Error.unknown}
+                return self.getAccountInfo(
+                    account: associatedTokenAccount.base58EncodedString,
+                    decodedTo: AccountInfo.self
+                )
+                    .map {info -> Bool in
+                        // detect if destination address is already a SPLToken address
+                        if info.data.mint.base58EncodedString == mint {
+                            return true
+                        }
+                        return false
+                    }
+                    .catch {error in
+                        if error.isEqualTo(Error.couldNotRetrieveAccountInfo) {
+                            return .just(false)
+                        }
+                        throw error
+                    }
+            }
+    }
 }
 
 private extension PrimitiveSequence{
     func retry(maxAttempts: Int, delay: RxTimeInterval) -> PrimitiveSequence<Trait, Element> {
-        return self.retry { errors in
+        return retry { errors in
             return errors.enumerated().flatMap{ (index, error) -> Observable<Int64> in
                 if index < maxAttempts {
                     return Observable<Int64>.timer(delay, scheduler: MainScheduler.instance)

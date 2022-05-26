@@ -28,7 +28,8 @@ extension SolanaSDK {
         )
             .map {Optional($0)}
             .catchAndReturn(nil)
-            .flatMap {info in
+            .flatMap { [weak self] info in
+                guard let self = self else {throw Error.unknown}
                 // if associated token account has been created
                 if info?.owner == PublicKey.tokenProgramId.base58EncodedString &&
                     info?.data != nil
@@ -69,6 +70,27 @@ extension SolanaSDK {
             }
     }
     
+    public func createAssociatedTokenAccountInstruction(
+        for owner: PublicKey,
+        tokenMint: PublicKey,
+        payer: PublicKey
+    ) throws -> TransactionInstruction {
+        do {
+            let associatedAddress = try PublicKey.associatedTokenAddress(
+                walletAddress: owner,
+                tokenMintAddress: tokenMint
+            )
+    
+            return AssociatedTokenProgram
+                .createAssociatedTokenAccountInstruction(
+                    mint: tokenMint,
+                    associatedAccount: associatedAddress,
+                    owner: owner,
+                    payer: payer
+                )
+        }
+    }
+    
     public func createAssociatedTokenAccount(
         for owner: PublicKey,
         tokenMint: PublicKey,
@@ -80,21 +102,9 @@ extension SolanaSDK {
             return .error(Error.unauthorized)
         }
         
-        // generate address
         do {
-            let associatedAddress = try PublicKey.associatedTokenAddress(
-                walletAddress: owner,
-                tokenMintAddress: tokenMint
-            )
-            
             // create instruction
-            let instruction = AssociatedTokenProgram
-                .createAssociatedTokenAccountInstruction(
-                    mint: tokenMint,
-                    associatedAccount: associatedAddress,
-                    owner: owner,
-                    payer: payer.publicKey
-                )
+            let instruction = try createAssociatedTokenAccountInstruction(for: owner, tokenMint: tokenMint, payer: payer.publicKey)
             
             // send transaction
             return serializeAndSend(
@@ -102,7 +112,6 @@ extension SolanaSDK {
                 signers: [payer],
                 isSimulation: isSimulation
             )
-            
         } catch {
             return .error(error)
         }

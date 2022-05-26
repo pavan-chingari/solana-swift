@@ -58,13 +58,14 @@ extension SolanaSDK {
         
         public static func unsupported(
             mint: String?,
-            decimals: Decimals = 0
+            decimals: Decimals = 0,
+            symbol: String = ""
         ) -> Token {
             Token(
                 _tags: [],
                 chainId: 101,
                 address: mint ?? "<undefined>",
-                symbol: "",
+                symbol: symbol,
                 name: mint ?? "<undefined>",
                 decimals: decimals,
                 logoURI: nil,

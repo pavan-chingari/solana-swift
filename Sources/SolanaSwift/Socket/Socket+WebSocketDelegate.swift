@@ -44,8 +44,6 @@ extension SolanaSDK.Socket: WebSocketDelegate {
             if let error = error {
                 onError(SolanaSDK.Error.socket(error))
             }
-            // reconnect
-            socket.connect()
         }
     }
     
@@ -60,9 +58,9 @@ extension SolanaSDK.Socket: WebSocketDelegate {
         
         // set heart beat
         wsHeartBeat?.invalidate()
-        wsHeartBeat = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { (_) in
+        wsHeartBeat = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] (_) in
             // Ping server every 5s to prevent idle timeouts
-            self.socket.write(ping: Data())
+            self?.socket.write(ping: Data())
         }
         
         // resubscribe
@@ -72,6 +70,7 @@ extension SolanaSDK.Socket: WebSocketDelegate {
     /// On socket error
     /// - Parameter error: socket's error
     func onError(_ error: Error) {
+        guard !status.value.isError else {return}
         status.accept(.error(error))
         Logger.log(message: "Socket error: \(error.localizedDescription)", event: .error)
     }

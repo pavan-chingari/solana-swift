@@ -9,6 +9,103 @@ import Foundation
 import RxSwift
 
 extension SolanaSDK {
+    public func prepareTransaction(
+        instructions: [TransactionInstruction],
+        signers: [Account],
+        feePayer: PublicKey,
+        accountsCreationFee: Lamports,
+        recentBlockhash: String? = nil,
+        lamportsPerSignature: Lamports? = nil
+    ) -> Single<PreparedTransaction> {
+        // get recentBlockhash
+        let getRecentBlockhashRequest: Single<String>
+        if let recentBlockhash = recentBlockhash {
+            getRecentBlockhashRequest = .just(recentBlockhash)
+        } else {
+            getRecentBlockhashRequest = getRecentBlockhash()
+        }
+        
+        // get lamports per signature
+        let getLamportsPerSignature: Single<Lamports>
+        if let lamportsPerSignature = lamportsPerSignature {
+            getLamportsPerSignature = .just(lamportsPerSignature)
+        } else {
+            getLamportsPerSignature = getFees().map {$0.feeCalculator?.lamportsPerSignature}.map {$0 ?? 0}
+        }
+        
+        return Single.zip(
+            getLamportsPerSignature,
+            getRecentBlockhashRequest
+        )
+            .map { lamportsPerSignature, recentBlockhash in
+                var transaction = Transaction()
+                transaction.instructions = instructions
+                transaction.recentBlockhash = recentBlockhash
+                transaction.feePayer = feePayer
+                
+                // calculate fee first
+                let expectedFee = FeeAmount(
+                    transaction: try transaction.calculateTransactionFee(lamportsPerSignatures: lamportsPerSignature),
+                    accountBalances: accountsCreationFee
+                )
+                
+                // resign transaction
+                try transaction.sign(signers: signers)
+                
+                return .init(transaction: transaction, signers: signers, expectedFee: expectedFee)
+            }
+    }
+    
+    public func serializeAndSend(
+        preparedTransaction: PreparedTransaction,
+        isSimulation: Bool
+    ) -> Single<String> {
+        do {
+            let serializedTransaction = try preparedTransaction.serialize()
+            let request: Single<String>
+            
+            if isSimulation {
+                request = simulateTransaction(transaction: serializedTransaction)
+                    .map {result -> String in
+                        if result.err != nil {
+                            throw Error.other("Simulation error")
+                        }
+                        return "<simulated transaction id>"
+                    }
+            } else {
+                request = sendTransaction(serializedTransaction: serializedTransaction)
+            }
+            
+            let maxAttemps = 3
+            var numberOfTries = 0
+            return request
+                .catch {[weak self] error in
+                    guard let self = self else {throw Error.unknown}
+                    if numberOfTries <= maxAttemps,
+                       let error = error as? SolanaSDK.Error
+                    {
+                        var shouldRetry = false
+                        switch error {
+                        case .other(let message) where message == "Blockhash not found":
+                            shouldRetry = true
+                        case .invalidResponse(let response) where response.message == "Blockhash not found":
+                            shouldRetry = true
+                        default:
+                            break
+                        }
+                        
+                        if shouldRetry {
+                            numberOfTries += 1
+                            return self.serializeAndSend(preparedTransaction: preparedTransaction, isSimulation: isSimulation)
+                        }
+                    }
+                    throw error
+                }
+        } catch {
+            return .error(error)
+        }
+    }
+    
     /// Traditional sending without FeeRelayer
     /// - Parameters:
     ///   - instructions: transaction's instructions
@@ -29,9 +126,10 @@ extension SolanaSDK {
             recentBlockhash: recentBlockhash,
             signers: signers
         )
-            .flatMap {
+            .flatMap { [weak self] transaction in
+                guard let self = self else {throw Error.unknown}
                 if isSimulation {
-                    return self.simulateTransaction(transaction: $0)
+                    return self.simulateTransaction(transaction: transaction)
                         .map {result -> String in
                             if result.err != nil {
                                 throw Error.other("Simulation error")
@@ -39,10 +137,11 @@ extension SolanaSDK {
                             return "<simulated transaction id>"
                         }
                 } else {
-                    return self.sendTransaction(serializedTransaction: $0)
+                    return self.sendTransaction(serializedTransaction: transaction)
                 }
             }
-            .catch {error in
+            .catch { [weak self] error in
+                guard let self = self else {throw Error.unknown}
                 if numberOfTries <= maxAttemps,
                    let error = error as? SolanaSDK.Error
                 {
