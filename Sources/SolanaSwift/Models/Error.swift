@@ -34,6 +34,7 @@ public extension SolanaSDK {
         
         case unauthorized
         case notFound
+        case assertionFailed
         
         // Invalid Requests
         case invalidRequest(reason: String? = nil)
@@ -52,7 +53,7 @@ public extension SolanaSDK {
         case unknown
         
         // Predefined error
-        static var couldNotRetrieveAccountInfo: Self {
+        public static var couldNotRetrieveAccountInfo: Self {
             .other("Could not retrieve account info")
         }
     }

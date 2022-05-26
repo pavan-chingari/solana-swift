@@ -11,23 +11,23 @@ import RxSwift
 extension SolanaSDK {
     public typealias SPLTokenDestinationAddress = (destination: PublicKey, isUnregisteredAsocciatedToken: Bool)
     
-    /// Send SOL to another account
+    /// Create prepared transaction for sending SOL
     /// - Parameters:
-    ///   - toPublicKey: destination address
-    ///   - amount: amount to send
-    ///   - isSimulation: define if this is a simulation or real transaction
-    ///   - customProxy: (optional) forward sending to a fee-relayer proxy
-    /// - Returns: transaction id
-    public func sendNativeSOL(
+    ///   - destination: destination wallet address
+    ///   - amount: amount in lamports
+    ///   - feePayer: customm fee payer, can be omited if the authorized user is the payer
+    /// - Returns: PreparedTransaction, can be send either directly or via custom fee relayer
+    public func prepareSendingNativeSOL(
         to destination: String,
         amount: UInt64,
-        isSimulation: Bool = false,
-        customProxy: SolanaCustomFeeRelayerProxy? = nil
-    ) -> Single<TransactionID> {
+        feePayer: PublicKey? = nil,
+        recentBlockhash: String? = nil,
+        lamportsPerSignature: Lamports? = nil
+    ) -> Single<PreparedTransaction> {
         guard let account = self.accountStorage.account else {
             return .error(Error.unauthorized)
         }
-        
+        let feePayer = feePayer ?? account.publicKey
         do {
             let fromPublicKey = account.publicKey
             
@@ -49,7 +49,8 @@ extension SolanaSDK {
                     }
                     throw error
                 }
-                .flatMap {
+                .flatMap { [weak self] in
+                    guard let self = self else {return .error(Error.unknown)}
                     // form instruction
                     let instruction = SystemProgram.transferInstruction(
                         from: fromPublicKey,
@@ -57,80 +58,76 @@ extension SolanaSDK {
                         lamports: amount
                     )
                     
-                    // if a proxy is existed, form signature, instruction and send them to this proxy
-                    if let proxy = customProxy {
-                        // form signature
-                        return Single.zip(
-                            proxy.getFeePayer(),
-                            self.getRecentBlockhash()
-                        )
-                            .map {feePayer, recentBlockhash in
-                                (try self.getSignatureForProxy(
-                                    feePayer: feePayer,
-                                    instructions: [instruction],
-                                    recentBlockhash: recentBlockhash),
-                                 recentBlockhash)
-                            }
-                            .flatMap {signature, recentBlockhash in
-                                proxy.transferSOL(
-                                    sender: account.publicKey.base58EncodedString,
-                                    recipient: destination,
-                                    amount: amount,
-                                    signature: signature,
-                                    blockhash: recentBlockhash,
-                                    isSimulation: isSimulation
-                                )
-                            }
-                    }
-                    
-                    // if not, serialize and send instructions normally
-                    return self.serializeAndSend(
+                    return self.prepareTransaction(
                         instructions: [instruction],
                         signers: [account],
-                        isSimulation: isSimulation
+                        feePayer: feePayer,
+                        accountsCreationFee: 0,
+                        recentBlockhash: recentBlockhash,
+                        lamportsPerSignature: lamportsPerSignature
                     )
                 }
-                .catch {error in
-                    var error = error
-                    if error.localizedDescription == "Invalid param: WrongSize"
-                    {
-                        error = Error.other("Wrong wallet address")
-                    }
-                    throw error
-                }
+                
         } catch {
             return .error(error)
         }
     }
     
-    /// Send SPLTokens to another account
+    /// Send SOL to another account
     /// - Parameters:
-    ///   - mintAddress: the mint address to define Token
-    ///   - fromPublicKey: source wallet address
-    ///   - destinationAddress: destination wallet address
+    ///   - destination: destination address
     ///   - amount: amount to send
-    ///   - isSimulation: define if this is a simulation or real transaction
-    ///   - customProxy: (optional) forward sending to a fee-relayer proxy
+    ///   - feePayer: customm fee payer, can be omited if the authorized user is the payer
     /// - Returns: transaction id
-    public func sendSPLTokens(
+    public func sendNativeSOL(
+        to destination: String,
+        amount: UInt64,
+        feePayer: PublicKey? = nil,
+        isSimulation: Bool = false
+    ) -> Single<TransactionID> {
+        prepareSendingNativeSOL(
+            to: destination,
+            amount: amount,
+            feePayer: feePayer
+        )
+            .flatMap { [weak self] preparedTransaction in
+                guard let self = self else {return .error(Error.unknown)}
+                return self.serializeAndSend(preparedTransaction: preparedTransaction, isSimulation: isSimulation)
+            }
+            .catch {error in
+                var error = error
+                if error.localizedDescription == "Invalid param: WrongSize"
+                {
+                    error = Error.other("Wrong wallet address")
+                }
+                throw error
+            }
+    }
+    
+    /// Create prepared transaction for sending SPL token
+    public func prepareSendingSPLTokens(
         mintAddress: String,
         decimals: Decimals,
         from fromPublicKey: String,
         to destinationAddress: String,
         amount: UInt64,
-        isSimulation: Bool = false,
-        customProxy: SolanaCustomFeeRelayerProxy? = nil
-    ) -> Single<TransactionID> {
+        feePayer: PublicKey? = nil,
+        transferChecked: Bool = false,
+        recentBlockhash: String? = nil,
+        lamportsPerSignature: Lamports? = nil,
+        minRentExemption: Lamports? = nil
+    ) -> Single<(preparedTransaction: PreparedTransaction, realDestination: String)> {
         guard let account = self.accountStorage.account else {
             return .error(Error.unauthorized)
         }
         
-        // OPTIONAL: custom fee payer request (for custom proxy)
-        let customFeePayerRequest: Single<PublicKey>
-        if let proxy = customProxy {
-            customFeePayerRequest = proxy.getFeePayer().map {try .init(string: $0)}
+        let feePayer = feePayer ?? account.publicKey
+        
+        let minRentExemptionRequest: Single<Lamports>
+        if let minRentExemption = minRentExemption {
+            minRentExemptionRequest = .just(minRentExemption)
         } else {
-            customFeePayerRequest = .just(account.publicKey)
+            minRentExemptionRequest = getMinimumBalanceForRentExemption(dataLength: AccountInfo.span)
         }
         
         // Request
@@ -139,9 +136,11 @@ extension SolanaSDK {
                 mintAddress: mintAddress,
                 destinationAddress: destinationAddress
             ),
-            customFeePayerRequest
+            minRentExemptionRequest
         )
-            .flatMap {splDestinationAddress, feePayer in
+            .flatMap { [weak self] splDestinationAddress, minRentExempt in
+                guard let self = self else {return .error(Error.unknown)}
+                
                 // get address
                 let toPublicKey = splDestinationAddress.destination
                 
@@ -155,6 +154,7 @@ extension SolanaSDK {
                 var instructions = [TransactionInstruction]()
                 
                 // create associated token address
+                var accountsCreationFee: UInt64 = 0
                 if splDestinationAddress.isUnregisteredAsocciatedToken {
                     let mint = try PublicKey(string: mintAddress)
                     let owner = try PublicKey(string: destinationAddress)
@@ -166,13 +166,14 @@ extension SolanaSDK {
                         payer: feePayer
                     )
                     instructions.append(createATokenInstruction)
+                    accountsCreationFee += minRentExempt
                 }
                 
                 // send instruction
                 let sendInstruction: TransactionInstruction
                 
                 // use transfer checked transaction for proxy, otherwise use normal transfer transaction
-                if customProxy != nil {
+                if transferChecked {
                     // transfer checked transaction
                     sendInstruction = TokenProgram.transferCheckedInstruction(
                         programId: .tokenProgramId,
@@ -197,43 +198,57 @@ extension SolanaSDK {
                 
                 instructions.append(sendInstruction)
                 
-                // if a proxy is existed, form signature, instruction and send them to this proxy
-                if let proxy = customProxy {
-                    // form signature
-                    return Single.zip(
-                        proxy.getFeePayer(),
-                        self.getRecentBlockhash()
-                    )
-                        .map {feePayer, recentBlockhash in
-                            (try self.getSignatureForProxy(
-                                feePayer: feePayer,
-                                instructions: instructions,
-                                recentBlockhash: recentBlockhash),
-                             recentBlockhash)
-                        }
-                        .flatMap {signature, recentBlockhash in
-                            // get real destination: if associated token has been registered, then send token to this address, if not, send token to SOL account address
-                            var realDestination = destinationAddress
-                            if !splDestinationAddress.isUnregisteredAsocciatedToken
-                            {
-                                realDestination = splDestinationAddress.destination.base58EncodedString
-                            }
-                            
-                            return proxy.transferSPLToken(
-                                sender: fromPublicKey.base58EncodedString,
-                                recipient: realDestination,
-                                mintAddress: mintAddress,
-                                authority: account.publicKey.base58EncodedString,
-                                amount: amount,
-                                decimals: decimals,
-                                signature: signature,
-                                blockhash: recentBlockhash
-                            )
-                        }
+                var realDestination = destinationAddress
+                if !splDestinationAddress.isUnregisteredAsocciatedToken
+                {
+                    realDestination = splDestinationAddress.destination.base58EncodedString
                 }
                 
                 // if not, serialize and send instructions normally
-                return self.serializeAndSend(instructions: instructions, signers: [account], isSimulation: isSimulation)
+                return self.prepareTransaction(
+                    instructions: instructions,
+                    signers: [account],
+                    feePayer: feePayer,
+                    accountsCreationFee: accountsCreationFee,
+                    recentBlockhash: recentBlockhash,
+                    lamportsPerSignature: lamportsPerSignature
+                )
+                    .map {(preparedTransaction: $0, realDestination: realDestination)}
+            }
+    }
+    
+    /// Send SPLTokens to another account
+    /// - Parameters:
+    ///   - mintAddress: the mint address to define Token
+    ///   - fromPublicKey: source wallet address
+    ///   - destinationAddress: destination wallet address
+    ///   - amount: amount to send
+    ///   - isSimulation: define if this is a simulation or real transaction
+    ///   - customProxy: (optional) forward sending to a fee-relayer proxy
+    /// - Returns: transaction id
+    public func sendSPLTokens(
+        mintAddress: String,
+        decimals: Decimals,
+        from fromPublicKey: String,
+        to destinationAddress: String,
+        amount: UInt64,
+        feePayer: PublicKey? = nil,
+        transferChecked: Bool = false,
+        isSimulation: Bool = false
+    ) -> Single<TransactionID> {
+        prepareSendingSPLTokens(
+            mintAddress: mintAddress,
+            decimals: decimals,
+            from: fromPublicKey,
+            to: destinationAddress,
+            amount: amount,
+            feePayer: feePayer,
+            transferChecked: transferChecked
+        )
+            .map {$0.preparedTransaction}
+            .flatMap { [weak self] preparedTransaction in
+                guard let self = self else {return .error(Error.unknown)}
+                return self.serializeAndSend(preparedTransaction: preparedTransaction, isSimulation: isSimulation)
             }
             .catch {error in
                 var error = error

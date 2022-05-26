@@ -738,7 +738,7 @@ public struct BInt:
 	//
 	//
 
-	static func **(lhs: BInt, rhs: Int) -> BInt
+	public static func **(lhs: BInt, rhs: Int) -> BInt
 	{
 		precondition(rhs >= 0, "BInts can't be exponentiated with exponents < 0")
 		return BInt(sign: lhs.sign && (rhs % 2 != 0), limbs: lhs.limbs.exponentiating(rhs))
@@ -2463,7 +2463,7 @@ public func *(lhs: BDouble, rhs: BDouble) -> BDouble
 	return res
 }
 
-func /(lhs: BDouble, rhs: BDouble) -> BDouble
+public func /(lhs: BDouble, rhs: BDouble) -> BDouble
 {
 	var res =  BDouble(
 		sign:			lhs.sign != rhs.sign,
