@@ -18,6 +18,7 @@ Solana-blockchain client, written in pure swift.
 ## Example
 
 To run the example project, clone the repo, and run `pod install` from the Example directory first.
+Demo wallet: [p2p-wallet](https://github.com/p2p-org/p2p-wallet-ios)
 
 ## Requirements
 - iOS 11 or later
@@ -136,7 +137,7 @@ solanaSDK.observeSignatureNotification(signature: <SIGNATURE>) // return an Comp
 ```
 
 ## How to use OrcaSwap
-* To test transitive swap with orca, the account must have some `SOL` and `KURO` token, then add this extensions to `Tests` target
+* To test transitive swap with orca, the account must have some `SOL`, `SLIM` and `KURO` token
 ```swift
 extension OrcaSwapTransitiveTests {
     var kuroPubkey: String {
@@ -145,6 +146,10 @@ extension OrcaSwapTransitiveTests {
     
     var secretPhrase: String {
         <account-seed-phrases>
+    }
+    
+    var slimPubkey: String {
+        <SLIM-pubkey-here>
     }
 }
 ```
