@@ -90,7 +90,8 @@ extension SolanaSDK.Transaction {
                 data = data.dropFirst(accountCount)
                 let dataLength = try data.decodeLength()
                 let dataSlice = data.prefix(dataLength)
-                data = data.suffix(dataLength)
+//                data = data.suffix(dataLength)
+                data = data.dropFirst(dataLength)
                 instructions.append(
                     CompiledInstruction(
                         programIdIndex: programIdIndex,
