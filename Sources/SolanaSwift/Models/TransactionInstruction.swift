@@ -13,7 +13,7 @@ extension SolanaSDK {
         public let programId: SolanaSDK.PublicKey
         public let data: [UInt8]
         
-        public init(keys: [SolanaSDK.Account.Meta], programId: SolanaSDK.PublicKey, data: [BytesEncodable])
+        init(keys: [SolanaSDK.Account.Meta], programId: SolanaSDK.PublicKey, data: [BytesEncodable])
         {
             self.keys = keys
             self.programId = programId
