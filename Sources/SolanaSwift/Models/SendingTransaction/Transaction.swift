@@ -64,9 +64,6 @@ extension SolanaSDK {
                 return uniqueSigners
             })
             
-            // map signatures
-            signatures = signers.map { Signature(signature: nil, publicKey: $0.publicKey) }
-            
             try partialSign(signers: signers)
         }
 
