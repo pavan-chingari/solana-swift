@@ -17,11 +17,14 @@ extension SolanaSDK {
         public var feePayer: PublicKey?
         public var instructions = [TransactionInstruction]()
         public var recentBlockhash: String?
-        public var encodedSerializedData: Data!
+        public let encodedSerializedData: Data
 //        TODO: nonceInfo
+
+        init(){
+            encodedSerializedData = Data()
+        }
         
-        convenience init(encodedSerializedData: Data) {
-            self.init()
+        init(encodedSerializedData: Data) {
             self.encodedSerializedData = encodedSerializedData
         }
         
