@@ -101,4 +101,18 @@ extension SolanaSDK {
                 return serializedTransaction
             }
     }
+    
+    public func serializeTransaction(
+        transaction: Transaction,
+        signers: [Account]
+    ) throws -> String {
+        var encodedtransaction = transaction
+        try encodedtransaction.signEncodedTransaction(signers: signers)
+        let serializedTransaction = try encodedtransaction.serializeEncodedTransaction().bytes.toBase64()
+        if let decodedTransaction = encodedtransaction.jsonString {
+            Logger.log(message: decodedTransaction, event: .info)
+            Logger.log(message: serializedTransaction, event: .info)
+        }
+        return serializedTransaction
+    }
 }
