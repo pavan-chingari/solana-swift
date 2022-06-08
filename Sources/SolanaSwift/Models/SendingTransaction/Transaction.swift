@@ -17,7 +17,13 @@ extension SolanaSDK {
         public var feePayer: PublicKey?
         public var instructions = [TransactionInstruction]()
         public var recentBlockhash: String?
+        public var encodedSerializedData: Data!
 //        TODO: nonceInfo
+        
+        convenience init(encodedSerializedData: Data) {
+            self.init()
+            self.encodedSerializedData = encodedSerializedData
+        }
         
         // MARK: - Methods
         public mutating func sign(signers: [Account]) throws {
@@ -41,6 +47,25 @@ extension SolanaSDK {
             try partialSign(message: message, signers: signers)
         }
         
+        
+        // MARK: - Methods
+        public mutating func signTransaction(signers: [Account]) throws {
+            guard signers.count > 0 else { throw Error.invalidRequest(reason: "No signers") }
+            
+            // unique signers
+            let signers = signers.reduce([Account](), { signers, signer in
+                var uniqueSigners = signers
+                if !uniqueSigners.contains(where: { $0.publicKey == signer.publicKey }) {
+                    uniqueSigners.append(signer)
+                }
+                return uniqueSigners
+            })
+            
+            // map signatures
+            signatures = signers.map { Signature(signature: nil, publicKey: $0.publicKey) }
+            
+            try partialSign(signers: signers)
+        }
 
         public mutating func serialize(
             requiredAllSignatures: Bool = false,
@@ -48,6 +73,21 @@ extension SolanaSDK {
         ) throws -> Data {
             // message
             let serializedMessage = try serializeMessage()
+            
+            // verification
+            if verifySignatures && !_verifySignatures(serializedMessage: serializedMessage, requiredAllSignatures: requiredAllSignatures) {
+                throw Error.invalidRequest(reason: "Signature verification failed")
+            }
+            
+            return _serialize(serializedMessage: serializedMessage)
+        }
+        
+        public mutating func serializeEncodedTransaction(
+            requiredAllSignatures: Bool = false,
+            verifySignatures: Bool = false
+        ) throws -> Data {
+            // message
+            let serializedMessage = encodedSerializedData
             
             // verification
             if verifySignatures && !_verifySignatures(serializedMessage: serializedMessage, requiredAllSignatures: requiredAllSignatures) {
@@ -79,6 +119,16 @@ extension SolanaSDK {
         // MARK: - Signing
         private mutating func partialSign(message: Message, signers: [Account]) throws {
             let signData = try message.serialize()
+            
+            for signer in signers {
+                let data = try NaclSign.signDetached(message: signData, secretKey: signer.secretKey)
+                try _addSignature(Signature(signature: data, publicKey: signer.publicKey))
+            }
+        }
+        
+        // MARK: - Signing
+        private mutating func partialSign(signers: [Account]) throws {
+            let signData = encodedSerializedData
             
             for signer in signers {
                 let data = try NaclSign.signDetached(message: signData, secretKey: signer.secretKey)
@@ -293,9 +343,9 @@ extension SolanaSDK {
                 if let signature = signature.signature {
                     data.append(signature)
                 } else {
-                    data = Data(fromArray: Array(repeating: 0, count: 8))
+//                    data = Data(fromArray: Array(repeating: 0, count: 8))
 //                    signaturesLength -= 1
-//                    data.append(SolanaSDK.Transaction.DEFAULT_SIGNATURE)
+                    data.append(SolanaSDK.Transaction.DEFAULT_SIGNATURE)
                 }
                 return data
             })
@@ -325,9 +375,57 @@ extension SolanaSDK {
             return populate(try Transaction.Message.from(data: data), signatures)
         }
         
+        static public func transferToTransaction(data: Data) throws -> Transaction {
+            var data = data
+            var signatures: [String] = []
+            let signatureCount = try data.decodeLength()
+            
+            for index in stride(from: 0, through: signatureCount - 1, by: 1) {
+                let signatureData = data.prefix(Transaction.SIGNATURE_LENGTH)
+                data = data.dropFirst(Transaction.SIGNATURE_LENGTH)
+                signatures.append(Base58.encode(signatureData))
+            }
+    
+            print(data.base64EncodedString())
+            return populate(try Transaction.Message.from(data: data), signatures, encodedTransactionData: data)
+        }
+        
         static func populate(_ message: Transaction.Message, _ signatures: [String]) -> Transaction {
             var transaction = Transaction()
             
+            transaction.recentBlockhash = message.recentBlockhash
+            if (message.header.numRequiredSignatures > 0) {
+                transaction.feePayer = message.accountKeys[0]
+            }
+            signatures.enumerated().forEach { (index, signature) in
+                let sigPubkeyPair = SolanaSDK.Transaction.Signature(
+                    signature: signature == Base58.encode(SolanaSDK.Transaction.DEFAULT_SIGNATURE) ? nil : Data(bytes: Base58.decode(signature)),
+                    publicKey: message.accountKeys[index]
+                )
+                transaction.signatures.append(sigPubkeyPair)
+            }
+            
+            message.instructions.forEach { instruction in
+                let keys: [SolanaSDK.Account.Meta] = instruction.accounts.map { account in
+                    let pubkey = message.accountKeys[account]
+                    return SolanaSDK.Account.Meta(
+                        publicKey: pubkey,
+                        isSigner: transaction.signatures.contains { keyObj in keyObj.publicKey == pubkey } || message.isAccountSigner(index: account),
+                        isWritable: message.isAccountWritable(index: account)
+                    )
+                }
+                
+                transaction.instructions.append(
+                    TransactionInstruction(keys: keys, programId: message.accountKeys[instruction.programIdIndexValue], data: instruction.data)
+                )
+            }
+            
+            return transaction
+        }
+        
+        static func populate(_ message: Transaction.Message, _ signatures: [String], encodedTransactionData: Data) -> Transaction {
+            var transaction = Transaction.init(encodedSerializedData: encodedTransactionData)
+
             transaction.recentBlockhash = message.recentBlockhash
             if (message.header.numRequiredSignatures > 0) {
                 transaction.feePayer = message.accountKeys[0]
