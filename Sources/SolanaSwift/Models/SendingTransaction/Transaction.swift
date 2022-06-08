@@ -49,7 +49,7 @@ extension SolanaSDK {
         
         
         // MARK: - Methods
-        public mutating func signTransaction(signers: [Account]) throws {
+        public mutating func signEncodedTransaction(signers: [Account]) throws {
             guard signers.count > 0 else { throw Error.invalidRequest(reason: "No signers") }
             
             // unique signers
