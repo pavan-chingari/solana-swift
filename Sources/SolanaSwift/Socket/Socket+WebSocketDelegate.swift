@@ -9,7 +9,7 @@ import Foundation
 import Starscream
 
 extension SolanaSDK.Socket: WebSocketDelegate {
-    public func didReceive(event: WebSocketEvent, client: WebSocket) {
+    public func didReceive(event: Starscream.WebSocketEvent, client: Starscream.WebSocketClient) {
         switch event {
         case .connected(let headers):
             Logger.log(message: "websocket is connected: \(headers)", event: .event)
@@ -46,6 +46,7 @@ extension SolanaSDK.Socket: WebSocketDelegate {
             }
             // reconnect
             socket.connect()
+        default:break
         }
     }
     
